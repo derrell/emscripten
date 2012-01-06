@@ -5165,6 +5165,23 @@ Options that are modified or new in %s include:
         assert os.path.exists('a.out.js'), '\n'.join(output)
         self.assertContained('hello, world!', run_js('a.out.js'))
 
+        # emcc [..] -o [path] ==> should work with absolute paths
+        try:
+          os.mkdir('a_dir')
+          os.chdir('a_dir')
+          os.mkdir('b_dir')
+          for path in [os.path.abspath(os.path.join('..', 'file1.js')), os.path.join('b_dir', 'file2.js')]:
+            clear()
+            output = Popen([compiler, path_from_root('tests', 'hello_world.ll'), '-o', path], stdout=PIPE, stderr=PIPE).communicate()
+            assert os.path.exists(path), path + ' does not exist; ' + '\n'.join(output)
+            self.assertContained('hello, world!', run_js(path))
+        finally:
+          os.chdir(self.get_dir())
+          try:
+            shutil.rmtree('a_dir')
+          except:
+            pass
+
         # dlmalloc. dlmalloc is special in that it is the only part of libc that is (1) hard to write well, and
         # very speed-sensitive. So we do not implement it in JS in library.js, instead we compile it from source
         for source, has_malloc in [('hello_world' + suffix, False), ('hello_malloc.cpp', True)]:
@@ -5218,7 +5235,7 @@ Options that are modified or new in %s include:
             assert 'Module._main = ' not in generated, 'closure compiler should not have been run'
             # XXX find a way to test this: assert ('& 255' in generated or '&255' in generated) == (opt_level <= 2), 'corrections should be in opt <= 2'
             assert ('(__label__)' in generated) == (opt_level <= 1), 'relooping should be in opt >= 2'
-            assert ('assert(STACKTOP < STACK_MAX)' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
+            assert ('assert(STACKTOP < STACK_MAX' in generated) == (opt_level == 0), 'assertions should be in opt == 0'
             assert 'var $i;' in generated, 'micro opts should always be on'
             if opt_level >= 1: assert 'HEAP8[HEAP32[' in generated, 'eliminator should create compound expressions, and fewer one-time vars'
             assert ('_puts(' in generated) == (opt_level >= 1), 'with opt >= 1, llvm opts are run and they should optimize printf to puts'
