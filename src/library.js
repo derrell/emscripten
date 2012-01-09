@@ -3201,7 +3201,9 @@ LibraryManager.library = {
   // ==========================================================================
 
   malloc: function(bytes) {
-    return Runtime.staticAlloc(bytes || 1); // accept 0 as an input because libc implementations tend to
+    var ptr = Runtime.staticAlloc((bytes + 8) || 8);
+    ptr = (ptr+8) & 0xFFFFFFF8;
+    return ptr;
   },
   _Znwj: 'malloc',
   _Znaj: 'malloc',
