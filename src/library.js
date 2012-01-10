@@ -3178,16 +3178,10 @@ LibraryManager.library = {
   mmap__deps: ['$FS'],
   mmap: function(start, num, prot, flags, stream, offset) {
     // FIXME: Leaky and non-share
-<<<<<<< HEAD
     if( stream == -1) {
       return Runtime.staticAlloc(num);
       //return allocate(num,'i8', ALLOC_STATIC);
     }
-=======
-    //if (stream == -1) { // XXX We should handle -1 here, but this code leads to an infinite loop
-    //  return allocate(num, 'i8', ALLOC_NORMAL);
-    //}
->>>>>>> 66a79e74a4d01f6cfc6fb8e289a00896e397d12f
     var info = FS.streams[stream];
     if (!info) return -1;
     return allocate(info.object.contents.slice(offset, offset+num),
