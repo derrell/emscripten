@@ -3178,10 +3178,16 @@ LibraryManager.library = {
   mmap__deps: ['$FS'],
   mmap: function(start, num, prot, flags, stream, offset) {
     // FIXME: Leaky and non-share
+<<<<<<< HEAD
     if( stream == -1) {
       return Runtime.staticAlloc(num);
       //return allocate(num,'i8', ALLOC_STATIC);
     }
+=======
+    //if (stream == -1) { // XXX We should handle -1 here, but this code leads to an infinite loop
+    //  return allocate(num, 'i8', ALLOC_NORMAL);
+    //}
+>>>>>>> 66a79e74a4d01f6cfc6fb8e289a00896e397d12f
     var info = FS.streams[stream];
     if (!info) return -1;
     return allocate(info.object.contents.slice(offset, offset+num),
@@ -3679,19 +3685,58 @@ LibraryManager.library = {
 
   // FIXME: memcpy, memmove and memset should all return their destination pointers.
 
-  memcpy__inline: function (dest, src, num, idunno) {
+  memcpy__inline: function (dest, src, num, align) {
     var ret = '';
 #if ASSERTIONS
     ret += "assert(" + num + " % 1 === 0, 'memcpy given ' + " + num + " + ' bytes to copy. Problem with quantum=1 corrections perhaps?');";
 #endif
-    ret += makeCopyValues(dest, src, num, 'null');
+    ret += makeCopyValues(dest, src, num, 'null', null, align);
     return ret;
   },
-  memcpy: function (dest, src, num, idunno) {
+  memcpy: function (dest, src, num, align) {
 #if ASSERTIONS
     assert(num % 1 === 0, 'memcpy given ' + num + ' bytes to copy. Problem with quantum=1 corrections perhaps?');
 #endif
-    {{{ makeCopyValues('dest', 'src', 'num', 'null') }}};
+#if USE_TYPED_ARRAYS == 2
+    if (num >= {{{ SEEK_OPTIMAL_ALIGN_MIN }}} && src % 2 == dest % 2) {
+      // This is unaligned, but quite large, and potentially alignable, so work hard to get to aligned settings
+      if (src % 4 == dest % 4) {
+        var stop = src + num;
+        while (src % 4) { // no need to check for stop, since we have large num
+          HEAP8[dest++] = HEAP8[src++];
+        }
+        var src4 = src >> 2, dest4 = dest >> 2, stop4 = stop >> 2;
+        while (src4 < stop4) {
+          HEAP32[dest4++] = HEAP32[src4++];
+        }
+        src = src4 << 2;
+        dest = dest4 << 2;
+        while (src < stop) {
+          HEAP8[dest++] = HEAP8[src++];
+        }
+      } else {
+        var stop = src + num;
+        if (src % 2) { // no need to check for stop, since we have large num
+          HEAP8[dest++] = HEAP8[src++];
+        }
+        var src2 = src >> 1, dest2 = dest >> 1, stop2 = stop >> 1;
+        while (src2 < stop2) {
+          HEAP16[dest2++] = HEAP16[src2++];
+        }
+        src = src2 << 1;
+        dest = dest2 << 1;
+        if (src < stop) {
+          HEAP8[dest++] = HEAP8[src++];
+        }
+      }
+    } else {
+      while (num--) {
+        HEAP8[dest++] = HEAP8[src++];
+      }
+    }
+#else
+    {{{ makeCopyValues('dest', 'src', 'num', 'null', null, 'align') }}};
+#endif
   },
 
   llvm_memcpy_i32: 'memcpy',
@@ -3700,24 +3745,54 @@ LibraryManager.library = {
   llvm_memcpy_p0i8_p0i8_i64: 'memcpy',
 
   memmove__deps: ['memcpy'],
-  memmove: function(dest, src, num, idunno) {
-    // not optimized!
-    if (num === 0) return; // will confuse malloc if 0
-    var tmp = _malloc(num);
-    _memcpy(tmp, src, num);
-    _memcpy(dest, tmp, num);
-    _free(tmp);
+  memmove: function(dest, src, num, align) {
+    if (src < dest && dest < src + num) {
+      // Copy backwards in a safe manner
+      src += num;
+      dest += num;
+      while (num--) {
+        dest--;
+        src--;
+        {{{ makeCopyValues('dest', 'src', 1, 'null', null, 1) }}};
+      }
+    } else {
+      _memcpy(dest, src, num, align);
+    }
   },
   llvm_memmove_i32: 'memmove',
   llvm_memmove_i64: 'memmove',
   llvm_memmove_p0i8_p0i8_i32: 'memmove',
   llvm_memmove_p0i8_p0i8_i64: 'memmove',
 
-  memset__inline: function(ptr, value, num) {
-    return makeSetValues(ptr, 0, value, 'null', num);
+  memset__inline: function(ptr, value, num, align) {
+    return makeSetValues(ptr, 0, value, 'null', num, align);
   },
-  memset: function(ptr, value, num) {
-    {{{ makeSetValues('ptr', '0', 'value', 'null', 'num') }}}
+  memset: function(ptr, value, num, align) {
+#if USE_TYPED_ARRAYS == 2
+    // TODO: make these settings, and in memcpy, {{'s
+    if (num >= {{{ SEEK_OPTIMAL_ALIGN_MIN }}}) {
+      // This is unaligned, but quite large, so work hard to get to aligned settings
+      var stop = ptr + num;
+      while (ptr % 4) { // no need to check for stop, since we have large num
+        HEAP8[ptr++] = value;
+      }
+      if (value < 0) value += 256; // make it unsigned
+      var ptr4 = ptr >> 2, stop4 = stop >> 2, value4 = value | (value << 8) | (value << 16) | (value << 24);
+      while (ptr4 < stop4) {
+        HEAP32[ptr4++] = value4;
+      }
+      ptr = ptr4 << 2;
+      while (ptr < stop) {
+        HEAP8[ptr++] = value;
+      }
+    } else {
+      while (num--) {
+        HEAP8[ptr++] = value;
+      }
+    }
+#else
+    {{{ makeSetValues('ptr', '0', 'value', 'null', 'num', 'align') }}};
+#endif
   },
   llvm_memset_i32: 'memset',
   llvm_memset_p0i8_i32: 'memset',
@@ -3751,7 +3826,7 @@ LibraryManager.library = {
   strcpy: function(pdest, psrc) {
     var i = 0;
     do {
-      {{{ makeCopyValues('pdest+i', 'psrc+i', 1, 'i8') }}}
+      {{{ makeCopyValues('pdest+i', 'psrc+i', 1, 'i8', null, 1) }}};
       i ++;
     } while ({{{ makeGetValue('psrc', 'i-1', 'i8') }}} != 0);
     return pdest;
@@ -3759,7 +3834,7 @@ LibraryManager.library = {
   stpcpy: function(pdest, psrc) {
     var i = 0;
     do {
-      {{{ makeCopyValues('pdest+i', 'psrc+i', 1, 'i8') }}}
+      {{{ makeCopyValues('pdest+i', 'psrc+i', 1, 'i8', null, 1) }}};
       i ++;
     } while ({{{ makeGetValue('psrc', 'i-1', 'i8') }}} != 0);
     return pdest + i - 1;
@@ -3780,7 +3855,7 @@ LibraryManager.library = {
     var len = _strlen(pdest);
     var i = 0;
     do {
-      {{{ makeCopyValues('pdest+len+i', 'psrc+i', 1, 'i8') }}}
+      {{{ makeCopyValues('pdest+len+i', 'psrc+i', 1, 'i8', null, 1) }}};
       i ++;
     } while ({{{ makeGetValue('psrc', 'i-1', 'i8') }}} != 0);
     return pdest;
@@ -3791,7 +3866,7 @@ LibraryManager.library = {
     var len = _strlen(pdest);
     var i = 0;
     while(1) {
-      {{{ makeCopyValues('pdest+len+i', 'psrc+i', 1, 'i8') }}}
+      {{{ makeCopyValues('pdest+len+i', 'psrc+i', 1, 'i8', null, 1) }}};
       if ({{{ makeGetValue('pdest', 'len+i', 'i8') }}} == 0) break;
       i ++;
       if (i == num) {
@@ -3899,7 +3974,7 @@ LibraryManager.library = {
   strdup: function(ptr) {
     var len = String_len(ptr);
     var newStr = _malloc(len + 1);
-    {{{ makeCopyValues('newStr', 'ptr', 'len', 'null') }}};
+    {{{ makeCopyValues('newStr', 'ptr', 'len', 'null', null, 1) }}};
     {{{ makeSetValue('newStr', 'len', '0', 'i8') }}};
     return newStr;
   },
@@ -4159,7 +4234,7 @@ LibraryManager.library = {
   llvm_va_end: function() {},
 
   llvm_va_copy: function(ppdest, ppsrc) {
-    {{{ makeCopyValues('ppdest', 'ppsrc', Runtime.QUANTUM_SIZE, 'null') }}}
+    {{{ makeCopyValues('ppdest', 'ppsrc', Runtime.QUANTUM_SIZE, 'null', null, 1) }}};
     /* Alternate implementation that copies the actual DATA; it assumes the va_list is prefixed by its size
     var psrc = IHEAP[ppsrc]-1;
     var num = IHEAP[psrc]; // right before the data, is the number of (flattened) values
@@ -4202,12 +4277,15 @@ LibraryManager.library = {
     throw 'Assertion failed: ' + Pointer_stringify(condition) + ', at: ' + [Pointer_stringify(filename), line, Pointer_stringify(func)];
   },
 
-  __cxa_guard_acquire: function() {
-    return 1;
+  __cxa_guard_acquire: function(variable) {
+    if (!{{{ makeGetValue(0, 'variable', 'i8', null, null, 1) }}}) { // ignore SAFE_HEAP stuff because llvm mixes i64 and i8 here
+      {{{ makeSetValue(0, 'variable', '1', 'i8') }}};
+      return 1;
+    }
+    return 0;
   },
-  __cxa_guard_release: function() {
-    return 1;
-  },
+  __cxa_guard_release: function() {},
+  __cxa_guard_abort: function() {},
 
   _ZTVN10__cxxabiv117__class_type_infoE: [1], // no inherited classes
   _ZTVN10__cxxabiv120__si_class_type_infoE: [2], // yes inherited classes
@@ -5074,13 +5152,13 @@ LibraryManager.library = {
   // ==========================================================================
 
   __tms_struct_layout: Runtime.generateStructInfo(null, '%struct.tms'),
-  times__deps: ['__tms_struct_layout'],
+  times__deps: ['__tms_struct_layout', 'memset'],
   times: function(buffer) {
     // clock_t times(struct tms *buffer);
     // http://pubs.opengroup.org/onlinepubs/009695399/functions/times.html
     // NOTE: This is fake, since we can't calculate real CPU time usage in JS.
     if (buffer !== 0) {
-      {{{ makeSetValues('buffer', '0', '0', 'null', '___tms_struct_layout.__size__') }}}
+      memset(buffer, 0, ___tms_struct_layout.__size__);
     }
     return 0;
   },

@@ -1409,6 +1409,56 @@ if 'benchmark' not in str(sys.argv) and 'sanity' not in str(sys.argv):
       '''
       self.do_run(src, 'z:1*', force_c=True)
 
+      if self.emcc_args is not None: # too slow in other modes
+        # We should not blow up the stack with numerous allocas
+
+        src = '''
+          #include <stdio.h>
+          #include <stdlib.h>
+
+          func(int i) {
+            char *pc = (char *)alloca(100);
+            *pc = i;
+            (*pc)++;
+            return (*pc) % 10;
+          }
+          int main() {
+            int total = 0;
+            for (int i = 0; i < 1024*1024; i++)
+              total += func(i);
+            printf("ok:%d*\\n", total);
+            return 0;
+          }
+        '''
+        self.do_run(src, 'ok:-32768*', force_c=True)
+
+        # We should also not blow up the stack with byval arguments
+        src = r'''
+          #include<stdio.h>
+          struct vec {
+            int x, y, z;
+            vec(int x_, int y_, int z_) : x(x_), y(y_), z(z_) {}
+            static vec add(vec a, vec b) {
+              return vec(a.x+b.x, a.y+b.y, a.z+b.z);
+            }
+          };
+          int main() {
+            int total = 0;
+            for (int i = 0; i < 1000; i++) {
+              for (int j = 0; j < 1000; j++) {
+                vec c(i+i%10, j*2, i%255);
+                vec d(j*2, j%255, i%120);
+                vec f = vec::add(c, d);
+                total += (f.x + f.y + f.z) % 100;
+                total %= 10240;
+              }
+            }
+            printf("sum:%d*\n", total);
+            return 1;
+          }
+        '''
+        self.do_run(src, 'sum:9780*')
+
     def test_array2(self):
         src = '''
           #include <stdio.h>
@@ -2221,6 +2271,19 @@ def process(filename):
           }
           '''
         self.do_run(src)
+
+    def test_memmove(self):
+      src = '''
+        #include <stdio.h>
+        #include <string.h>
+        int main() {
+          char str[] = "memmove can be very useful....!";
+          memmove (str+20, str+15, 11);
+          puts(str);
+          return 0;
+        }
+      '''
+      self.do_run(src)
 
     def test_bsearch(self):
       if Settings.QUANTUM_SIZE == 1: return self.skip('Test cannot work with q1')
@@ -3781,10 +3844,20 @@ def process(filename):
         try_delete(os.path.join(self.get_dir(), 'src.cpp.o.js'))
         output = Popen([EMCC, path_from_root('tests', 'dlmalloc_test.c'),
                         '-o', os.path.join(self.get_dir(), 'src.cpp.o.js')], stdout=PIPE, stderr=self.stderr_redirect).communicate()
-        #print output
 
         self.do_run('x', '*1,0*', ['200', '1'], no_build=True)
         self.do_run('x', '*400,0*', ['400', '400'], no_build=True)
+
+        # The same for new and all its variants
+        src = open(path_from_root('tests', 'new.cpp')).read()
+        for new, delete in [
+          ('malloc(100)', 'free'),
+          ('new char[100]', 'delete[]'),
+          ('new Structy', 'delete'),
+          ('new int', 'delete'),
+          ('new Structy[10]', 'delete[]'),
+        ]:
+          self.do_run(src.replace('{{{ NEW }}}', new).replace('{{{ DELETE }}}', delete), '*1,0*')
 
     def test_libcxx(self):
       self.do_run(path_from_root('tests', 'libcxx'),
@@ -3804,6 +3877,36 @@ def process(filename):
           return 1;
         }
         ''', 'hello world', includes=[path_from_root('tests', 'libcxx', 'include')]);
+        
+    def test_static_variable(self):
+      Settings.SAFE_HEAP = 0 # LLVM mixes i64 and i8 in the guard check
+      src = '''
+        #include <stdio.h>
+
+        struct DATA
+        {
+            int value;
+    
+            DATA()
+            {
+                value = 0;
+            }
+        };
+
+        DATA & GetData()
+        {
+            static DATA data;
+    
+            return data;
+        }
+
+        int main()
+        {
+            GetData().value = 10;
+            printf( "value:%i", GetData().value );
+        }
+      '''
+      self.do_run(src, 'value:10')
 
     def test_cubescript(self):
       if self.emcc_args is not None and '-O2' in self.emcc_args:
@@ -4146,7 +4249,7 @@ def process(filename):
         for name in glob.glob(path_from_root('tests', 'cases', '*.ll')):
           shortname = name.replace('.ll', '')
           if '' not in shortname: continue
-          print "Testing case '%s'..." % shortname
+          print >> sys.stderr, "Testing case '%s'..." % shortname
           output_file = path_from_root('tests', 'cases', shortname + '.txt')
           if Settings.QUANTUM_SIZE == 1:
             q1_output_file = path_from_root('tests', 'cases', shortname + '_q1.txt')
@@ -5208,6 +5311,7 @@ Options that are modified or new in %s include:
           (['-o', 'something.bc'], 1, ['-O1'], 0, 0),
           (['-o', 'something.bc'], 2, ['-O2'], 1, 0),
           (['-o', 'something.bc'], 3, ['-O3'], 1, 0),
+          (['-O1', '-o', 'something.bc'], 0, [], 0, 0), # -Ox is ignored and warned about
         ]:
           #print params, opt_level, bc_params, closure
           clear()
@@ -5215,10 +5319,12 @@ Options that are modified or new in %s include:
                          stdout=PIPE, stderr=PIPE).communicate()
           assert len(output[0]) == 0, output[0]
           if bc_params is not None:
+            if '-O1' in params and 'something.bc' in params:
+              assert 'warning: -Ox flags ignored, since not generating JavaScript' in output[1]
             assert os.path.exists('something.bc'), output[1]
             output = Popen([compiler, 'something.bc', '-o', 'something.js'] + bc_params, stdout=PIPE, stderr=PIPE).communicate()
           assert os.path.exists('something.js'), output[1]
-          assert ('Warning: The relooper optimization can be very slow.' in output[1]) == (opt_level >= 2), 'relooper warning should appear in opt >= 2'
+          assert ('warning: The relooper optimization can be very slow.' in output[1]) == (opt_level >= 2), 'relooper warning should appear in opt >= 2'
           assert ('Warning: Applying some potentially unsafe optimizations!' in output[1]) == (opt_level >= 3), 'unsafe warning should appear in opt >= 3'
           self.assertContained('hello, world!', run_js('something.js'))
 
@@ -5419,7 +5525,7 @@ elif 'benchmark' in str(sys.argv):
   Building.COMPILER_TEST_OPTS = []
 
   TEST_REPS = 10
-  TOTAL_TESTS = 7
+  TOTAL_TESTS = 8
 
   tests_done = 0
   total_times = map(lambda x: 0., range(TOTAL_TESTS))
@@ -5529,7 +5635,6 @@ elif 'benchmark' in str(sys.argv):
       self.do_benchmark(src, [], 'lastprime: 1297001.')
 
     def test_memops(self):
-      # memcpy would also be interesting, however native code uses SSE/NEON/etc. and is much, much faster than JS can be
       src = '''
         #include<stdio.h>
         #include<string.h>
@@ -5551,6 +5656,49 @@ elif 'benchmark' in str(sys.argv):
         }      
       '''
       self.do_benchmark(src, [], 'final: 720.')
+
+    def test_copy(self):
+      src = r'''
+        #include<stdio.h>
+        struct vec {
+          int x, y, z;
+          int r, g, b;
+          vec(int x_, int y_, int z_, int r_, int g_, int b_) : x(x_), y(y_), z(z_), r(r_), g(g_), b(b_) {}
+          static vec add(vec a, vec b) {
+            return vec(a.x+b.x, a.y+b.y, a.z+b.z, a.r+b.r, a.g+b.g, a.b+b.b);
+          }
+          void norm() {
+            x %= 1024;
+            y %= 1024;
+            z %= 1024;
+            r %= 1024;
+            b %= 1024;
+            g %= 1024;
+          }
+          int sum() { return x + y + z + r + g + b; }
+        };
+        int main() {
+          int total = 0;
+          for (int i = 0; i < 1250; i++) {
+            for (int j = 0; j < 1000; j++) {
+              vec c(i, i+i%10, j*2, i%255, j%120, i%15);
+              vec d(j+i%10, j*2, j%255, i%120, j%15, j);
+              vec e = c;
+              c.norm();
+              d.norm();
+              vec f = vec::add(c, d);
+              f = vec::add(e, f);
+              f.norm();
+              f = vec::add(d, f);
+              total += f.sum() % 100;
+              total %= 10240;
+            }
+          }
+          printf("sum:%d\n", total);
+          return 1;
+        }      
+      '''
+      self.do_benchmark(src, [], 'sum:9928\n', emcc_args=['-s', 'QUANTUM_SIZE=4', '-s', 'USE_TYPED_ARRAYS=2'])
 
     def test_fannkuch(self):
       src = open(path_from_root('tests', 'fannkuch.cpp'), 'r').read()

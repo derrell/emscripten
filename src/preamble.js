@@ -179,6 +179,7 @@ var CorrectionsMonitor = {
   },
 
   print: function() {
+#if PGO
     var items = [];
     for (var sig in this.sigs) {
       items.push({
@@ -193,6 +194,7 @@ var CorrectionsMonitor = {
       var item = items[i];
       print(item.sig + ' : ' + item.total + ' hits, %' + (Math.ceil(100*item.fails/item.total)) + ' failures');
     }
+#endif
   }
 };
 
@@ -550,7 +552,7 @@ function enlargeMemory() {
   assert(TOTAL_MEMORY > 4); // So the loop below will not be infinite
 #endif
   while (TOTAL_MEMORY <= STATICTOP) { // Simple heuristic. Override enlargeMemory() if your program has something more optimal for it
-    TOTAL_MEMORY = alignMemoryPage(TOTAL_MEMORY*1.25);
+    TOTAL_MEMORY = alignMemoryPage(2*TOTAL_MEMORY);
   }
 #if USE_TYPED_ARRAYS == 1
   var oldIHEAP = IHEAP;

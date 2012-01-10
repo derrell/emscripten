@@ -505,7 +505,8 @@ function JSify(data, functionsOnly, givenFunctions) {
                 +    '}\n';
       }
 
-      func.JS += '  ' + RuntimeGenerator.stackEnter(func.initialStack) + ';\n';
+      // Prepare the stack, if we need one. If we have other stack allocations, force the stack to be set up.
+      func.JS += '  ' + RuntimeGenerator.stackEnter(func.initialStack, func.otherStackAllocations) + ';\n';
 
       // Make copies of by-value params
       // XXX It is not clear we actually need this. While without this we fail, it does look like
@@ -519,7 +520,7 @@ function JSify(data, functionsOnly, givenFunctions) {
           var type = removePointing(param.type);
           var typeInfo = Types.types[type];
           func.JS += '  var tempParam = ' + param.ident + '; ' + param.ident + ' = ' + RuntimeGenerator.stackAlloc(typeInfo.flatSize) + ';' +
-                     makeCopyValues(param.ident, 'tempParam', typeInfo.flatSize, 'null') + ';\n';
+                     makeCopyValues(param.ident, 'tempParam', typeInfo.flatSize, 'null', null, param.byVal) + ';\n';
         }
       });
 
@@ -907,7 +908,7 @@ function JSify(data, functionsOnly, givenFunctions) {
     return ret;
   });
   makeFuncLineActor('return', function(item) {
-    var ret = RuntimeGenerator.stackExit(item.funcData.initialStack) + ';\n';
+    var ret = RuntimeGenerator.stackExit(item.funcData.initialStack, item.funcData.otherStackAllocations) + ';\n';
     if (PROFILE) {
       ret += 'if (PROFILING) { '
           +    'PROFILING_NODE.time += Date.now() - __profilingStartTime__; '
