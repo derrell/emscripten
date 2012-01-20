@@ -894,7 +894,7 @@ function JSify(data, functionsOnly, givenFunctions) {
       if (!first) {
         if(!SWITCH_IN_SWITCH) ret += 'else ';
       } else {
-        if(SWITCH_IN_SWITCH) ret += 'switch (' + item.ident + ') {\n';  
+        if(SWITCH_IN_SWITCH) ret += 'SL' + item.ident + '_$: do { switch (' + item.ident + ') {\n';  
         first = false;
       }
       if(SWITCH_IN_SWITCH) {
@@ -904,11 +904,11 @@ function JSify(data, functionsOnly, givenFunctions) {
       }
       var labelBranch = getPhiSetsForLabel(phiSets, targetLabel) + makeBranch(targetLabel, item.currLabelId || null);
       ret += '    ' + labelBranch + '\n';
-      ret += SWITCH_IN_SWITCH ? '    break;\n' : '}\n';
+      ret += SWITCH_IN_SWITCH ? '    break SL' + item.ident + '_$;\n' : '}\n';
     }
     if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '  default:\n' : 'else {\n';
     ret += '    ' + getPhiSetsForLabel(phiSets, item.defaultLabel) + makeBranch(item.defaultLabel, item.currLabelId) + '\n';
-    if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '    break;\n}\n' : '}\n';
+    if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '    break SL' + item.ident + '_$;\n} } while(0);\n' : '}\n';
     if (item.value) {
       ret += ' ' + toNiceIdent(item.value);
     }
