@@ -580,7 +580,7 @@ function JSify(data, functionsOnly, givenFunctions) {
           ret += indent + block.id + ': do { \n';
           multipleIdent = '  ';
           // TODO: Find out cases where the final if/case is not needed - where we know we must be in a specific label at that point
-          var SWITCH_IN_MULTIPLE = 1; // This appears to never be worth it, for no amount of labels
+          var SWITCH_IN_MULTIPLE = 0; // This appears to never be worth it, for no amount of labels
           if (SWITCH_IN_MULTIPLE && block.entryLabels.length >= 2) {
             ret += indent + multipleIdent + 'switch(__label__) {\n';
             block.entryLabels.forEach(function(entryLabel) {
@@ -890,6 +890,7 @@ function JSify(data, functionsOnly, givenFunctions) {
     });
     var ret = '';
     var first = true;
+    var needsBreak = false;
     for (var targetLabel in targetLabels) {
       if (!first) {
         if(!SWITCH_IN_SWITCH) ret += 'else ';
@@ -902,13 +903,25 @@ function JSify(data, functionsOnly, givenFunctions) {
       } else {
         ret += 'if (' + targetLabels[targetLabel].map(function(value) { return item.ident + ' == ' + value }).join(' || ') + ') {\n';
       }
-      ret += '    ' + getPhiSetsForLabel(phiSets, targetLabel) + makeBranch(targetLabel, item.currLabelId || null) + '\n';
-      ret += SWITCH_IN_SWITCH ? '    break;\n' : '}\n';
+      var labelBranch = getPhiSetsForLabel(phiSets, targetLabel) + makeBranch(targetLabel, item.currLabelId || null);
+      ret += '    ' + labelBranch + '\n';
+      if (SWITCH_IN_SWITCH) {
+        if (labelBranch.indexOf('break;') == -1) {
+          ret += '    break;\n';
+        } else {
+          needsBreak = true;
+        }
+      } else {
+        ret += '}\n';
+      }
     }
     if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '  default:\n' : 'else {\n';
     ret += '    ' + getPhiSetsForLabel(phiSets, item.defaultLabel) + makeBranch(item.defaultLabel, item.currLabelId) + '\n';
     if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '    break;\n' : '}\n';
     if(SWITCH_IN_SWITCH) ret += '}\n';
+    if (needsBreak) {
+      ret += 'break;';
+    }
     if (item.value) {
       ret += ' ' + toNiceIdent(item.value);
     }
