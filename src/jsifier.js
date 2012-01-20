@@ -560,7 +560,7 @@ function JSify(data, functionsOnly, givenFunctions) {
             if (block.entries.length == 1) {
               ret += indent + '__label__ = ' + getLabelId(block.entries[0]) + '; ' + (SHOW_LABELS ? '/* ' + block.entries[0] + ' */' : '') + '\n';
             } // otherwise, should have been set before!
-            ret += indent + 'while(1) switch(__label__) {\n';
+            ret += indent + 'while(1) outer_switch_label__: switch(__label__) {\n';
             ret += block.labels.map(function(label) {
               return indent + '  case ' + getLabelId(label.ident) + ': // ' + label.ident + '\n'
                             + getLabelLines(label, indent + '    ');
@@ -779,7 +779,7 @@ function JSify(data, functionsOnly, givenFunctions) {
       }
     } else {
       if (!labelIsVariable) label = getLabelId(label);
-      return pre + '__label__ = ' + label + ';' + (SHOW_LABELS ? ' /* to: ' + cleanLabel(label) + ' */' : '') + ' break;';
+      return pre + '__label__ = ' + label + ';' + (SHOW_LABELS ? ' /* to: ' + cleanLabel(label) + ' */' : '') + ' break outer_switch_label__;';
     }
   }
 
@@ -890,7 +890,6 @@ function JSify(data, functionsOnly, givenFunctions) {
     });
     var ret = '';
     var first = true;
-    var needsBreak = false;
     for (var targetLabel in targetLabels) {
       if (!first) {
         if(!SWITCH_IN_SWITCH) ret += 'else ';
@@ -905,23 +904,11 @@ function JSify(data, functionsOnly, givenFunctions) {
       }
       var labelBranch = getPhiSetsForLabel(phiSets, targetLabel) + makeBranch(targetLabel, item.currLabelId || null);
       ret += '    ' + labelBranch + '\n';
-      if (SWITCH_IN_SWITCH) {
-        if (labelBranch.indexOf('break;') == -1) {
-          ret += '    break;\n';
-        } else {
-          needsBreak = true;
-        }
-      } else {
-        ret += '}\n';
-      }
+      ret += SWITCH_IN_SWITCH ? '    break;\n' : '}\n';
     }
     if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '  default:\n' : 'else {\n';
     ret += '    ' + getPhiSetsForLabel(phiSets, item.defaultLabel) + makeBranch(item.defaultLabel, item.currLabelId) + '\n';
-    if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '    break;\n' : '}\n';
-    if(SWITCH_IN_SWITCH) ret += '}\n';
-    if (needsBreak) {
-      ret += 'break;';
-    }
+    if (item.switchLabels.length > 0) ret += SWITCH_IN_SWITCH ? '    break;\n}\n' : '}\n';
     if (item.value) {
       ret += ' ' + toNiceIdent(item.value);
     }
