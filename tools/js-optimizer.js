@@ -901,7 +901,7 @@ function hoistMultiples(ast) {
       for (var i = 0; i < statements.length-1; i++) {
         var modifiedI = false;
         var pre = statements[i];
-        if (pre[0] != 'if') continue;
+        if (pre[0] != 'switch' && pre[0] != 'switch') continue;
         var post = statements[i+1];
         // Look into some block types. shell() will then recreate the shell that we looked into
         var postInner = post;
