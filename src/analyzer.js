@@ -1234,7 +1234,7 @@ function analyzer(data, sidePass) {
             if (line.intertype == 'call' && line.ident == setjmp) {
               // Add a new label
               var oldIdent = label.ident;
-              var newIdent = oldIdent + '$$' + i;
+              var newIdent = func.labelIdCounter++;
               if (!func.setjmpTable) func.setjmpTable = [];
               func.setjmpTable.push([oldIdent, newIdent, line.assignTo]);
               func.labels.splice(i+1, 0, {
